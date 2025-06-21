@@ -1,14 +1,20 @@
-<!DOCTYPE html>
+<!-- <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
+  <meta charset="UTF-8" />
   <title>🕶️ Eyewear Recommender</title>
   <style>
     body {
-      font-family: Arial, sans-serif;
-      padding: 20px;
-      max-width: 800px;
+      font-family: 'Segoe UI', sans-serif;
+      padding: 30px;
+      max-width: 900px;
       margin: auto;
+      background-color: #f7f9fc;
+    }
+
+    h1, h2 {
+      margin-bottom: 10px;
+      color: #2c3e50;
     }
 
     video, canvas, #snapshotPreview {
@@ -16,60 +22,125 @@
       height: 240px;
       border: 1px solid #ccc;
       margin-top: 10px;
+      border-radius: 6px;
     }
 
     .frame-item {
       display: flex;
       align-items: center;
       margin-bottom: 15px;
-      border-bottom: 1px solid #eee;
-      padding-bottom: 10px;
+      background-color: #fff;
+      border-radius: 8px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+      padding: 10px;
     }
 
     .frame-item img {
       width: 100px;
       height: auto;
-      margin-right: 10px;
+      margin-right: 15px;
+      border-radius: 4px;
     }
 
     .frame-details {
       font-size: 14px;
+      color: #333;
     }
 
-    h1, h2 {
-      margin-bottom: 10px;
-    }
-
-    #downloadBtn {
+    #downloadBtn, #snap {
       margin-top: 10px;
-      padding: 8px 15px;
+      padding: 10px 16px;
       background: #2c7be5;
       color: white;
       border: none;
       border-radius: 6px;
       cursor: pointer;
+      font-weight: bold;
+      margin-right: 10px;
+    }
+
+    #downloadBtn:hover, #snap:hover {
+      background-color: #1b59c9;
+    }
+
+    form select {
+      width: 100%;
+      padding: 10px;
+      margin-bottom: 15px;
+      border-radius: 6px;
+      border: 1px solid #ccc;
+    }
+
+    label {
+      display: block;
+      font-weight: bold;
+      margin-top: 15px;
+    }
+
+    #result {
+      margin-top: 40px;
+    }
+
+    .hidden {
       display: none;
     }
 
-    #downloadBtn:hover {
-      background-color: #1b59c9;
+    .loading {
+      font-style: italic;
+      color: #999;
     }
   </style>
-  <!-- MediaPipe FaceMesh -->
+
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
 </head>
 <body>
   <h1>🕶️ Eyewear Recommender</h1>
 
+  <form id="prefForm">
+    <h2>🧩 Optional Preferences</h2>
+    <label>Style:
+      <select name="style">
+        <option value="">No Preference</option>
+        <option value="classic">Classic</option>
+        <option value="sporty">Sporty</option>
+        <option value="fashion">Fashion</option>
+        <option value="vintage">Vintage</option>
+        <option value="casual">Casual</option>
+        <option value="minimalist">Minimalist</option>
+      </select>
+    </label>
+
+    <label>Rim Type:
+      <select name="rim_type">
+        <option value="">No Preference</option>
+        <option value="full-rim">Full Rim</option>
+        <option value="half-rim">Half Rim</option>
+        <option value="rimless">Rimless</option>
+      </select>
+    </label>
+
+    <label>Material:
+      <select name="material">
+        <option value="">No Preference</option>
+        <option value="acetate">Acetate</option>
+        <option value="metal">Metal</option>
+        <option value="plastic">Plastic</option>
+        <option value="titanium">Titanium</option>
+        <option value="ultem">Ultem</option>
+        <option value="TR-90">TR-90</option>
+      </select>
+    </label>
+  </form>
+
   <video id="video" autoplay muted></video><br>
-  <button id="snap">📸 Capture & Analyze</button><br>
-  <button id="downloadBtn">⬇️ Download .obj</button>
+  <button id="snap">📸 Capture & Recommend</button>
+  <button id="downloadBtn" class="hidden">⬇️ Download .obj</button>
 
-  <canvas id="canvas" width="320" height="240" style="display:none;"></canvas>
-  <img id="snapshotPreview" alt="Snapshot Preview" style="display: none;"><br>
+  <canvas id="canvas" width="320" height="240" class="hidden"></canvas>
+  <img id="snapshotPreview" alt="Snapshot Preview" class="hidden"><br>
 
-  <div id="result" style="margin-top: 30px;"></div>
+  <div id="result"></div>
 
   <script>
     const video = document.getElementById('video');
@@ -79,16 +150,13 @@
     const downloadBtn = document.getElementById('downloadBtn');
     const snapshotPreview = document.getElementById('snapshotPreview');
     const resultDiv = document.getElementById('result');
+    const form = document.getElementById('prefForm');
     let currentLandmarks = null;
 
-    // Set up webcam stream
     navigator.mediaDevices.getUserMedia({ video: true }).then(stream => {
       video.srcObject = stream;
-    }).catch(err => {
-      alert("Webcam access error: " + err.message);
-    });
+    }).catch(err => alert("Webcam access error: " + err.message));
 
-    // MediaPipe FaceMesh setup
     const faceMesh = new FaceMesh({
       locateFile: file => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`
     });
@@ -101,31 +169,38 @@
     });
 
     faceMesh.onResults(results => {
-      if (results.multiFaceLandmarks && results.multiFaceLandmarks.length > 0) {
+      if (results.multiFaceLandmarks?.length > 0) {
         currentLandmarks = results.multiFaceLandmarks[0];
-        downloadBtn.style.display = "inline-block";
+        downloadBtn.classList.remove('hidden');
       }
     });
 
     const camera = new Camera(video, {
-      onFrame: async () => {
-        await faceMesh.send({ image: video });
-      },
+      onFrame: async () => await faceMesh.send({ image: video }),
       width: 320,
       height: 240
     });
     camera.start();
 
-    // Button: Analyze & capture
     snap.addEventListener('click', async () => {
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
       const dataUrl = canvas.toDataURL('image/jpeg');
       snapshotPreview.src = dataUrl;
-      snapshotPreview.style.display = 'block';
+      snapshotPreview.classList.remove('hidden');
 
       canvas.toBlob(async (blob) => {
         const formData = new FormData();
         formData.append('file', blob, 'snapshot.jpg');
+
+        const style = form.style.value || 'classic';
+        const rim = form.rim_type.value || 'full-rim';
+        const material = form.material.value || 'acetate';
+
+        formData.append("style", style);
+        formData.append("rim_type", rim);
+        formData.append("material", material);
+
+        resultDiv.innerHTML = `<p class="loading">Analyzing face and preferences...</p>`;
 
         try {
           const res = await fetch("/analyze-face", {
@@ -151,6 +226,8 @@
                 <img src="${f.image_url}" alt="${f.name}">
                 <div class="frame-details">
                   <strong>${f.name}</strong> (${f.brand})<br>
+                  Style: ${f.style} | Rim: ${f.rim_type} | Material: ${f.material}<br>
+                  Size: ${f.width_mm}mm x ${f.height_mm}mm<br>
                   Similarity: ${(f.similarity * 100).toFixed(2)}%
                 </div>
               </div>
@@ -162,7 +239,316 @@
       }, 'image/jpeg');
     });
 
-    // Download .obj file
+    downloadBtn.addEventListener('click', () => {
+      if (!currentLandmarks) return;
+
+      const obj = currentLandmarks.map(p => `v ${p.x} ${p.y} ${p.z}`).join('\n');
+      const blob = new Blob([obj], { type: "text/plain" });
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(blob);
+      link.download = "face_mesh.obj";
+      link.click();
+    });
+  </script>
+</body>
+</html> -->
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>💖 Eyewear Recommender</title>
+  <style>
+    :root {
+      --primary-color: #2c7be5;
+      --primary-hover: #1b59c9;
+      --accent-color: #28a745;
+      --accent-hover: #218838;
+      --text-color: #2c3e50;
+      --bg-color: #f7f9fc;
+      --card-bg: #ffffff;
+      --border-radius: 12px;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: 'Inter', 'Segoe UI', sans-serif;
+      background-color: var(--bg-color);
+      color: var(--text-color);
+      padding: 40px 20px;
+      max-width: 1000px;
+      margin: auto;
+      line-height: 1.6;
+    }
+
+    h1, h2 {
+      margin-bottom: 1rem;
+      text-align: center;
+    }
+
+    h1 {
+      font-size: 2.5rem;
+    }
+
+    form {
+      background: var(--card-bg);
+      padding: 24px;
+      border-radius: var(--border-radius);
+      box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+      margin-bottom: 2rem;
+    }
+
+    label {
+      display: block;
+      font-weight: 600;
+      margin: 1rem 0 0.5rem;
+    }
+
+    select {
+      width: 100%;
+      padding: 12px;
+      border-radius: var(--border-radius);
+      border: 1px solid #ccc;
+      font-size: 1rem;
+      background-color: #fff;
+      margin-bottom: 1rem;
+    }
+
+    video, canvas, #snapshotPreview {
+      display: block;
+      margin: 1.5rem auto;
+      width: 100%;
+      max-width: 360px;
+      height: auto;
+      border-radius: var(--border-radius);
+      border: 1px solid #ccc;
+    }
+
+    .button-group {
+      display: flex;
+      justify-content: center;
+      gap: 1rem;
+      margin-top: 1rem;
+    }
+
+    button {
+      padding: 12px 24px;
+      border-radius: var(--border-radius);
+      font-weight: bold;
+      font-size: 1rem;
+      border: none;
+      cursor: pointer;
+      transition: background-color 0.3s ease;
+    }
+
+    #snap {
+      background-color: var(--accent-color);
+      color: white;
+    }
+
+    #snap:hover {
+      background-color: var(--accent-hover);
+    }
+
+    #downloadBtn {
+      background-color: var(--primary-color);
+      color: white;
+    }
+
+    #downloadBtn:hover {
+      background-color: var(--primary-hover);
+    }
+
+    #result {
+      margin-top: 2rem;
+    }
+
+    .frame-item {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      background: var(--card-bg);
+      padding: 16px;
+      border-radius: var(--border-radius);
+      box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+      margin-bottom: 1rem;
+    }
+
+    .frame-item img {
+      width: 100px;
+      border-radius: 8px;
+    }
+
+    .frame-details {
+      font-size: 0.95rem;
+      color: #444;
+    }
+
+    .hidden {
+      display: none;
+    }
+
+    .loading {
+      text-align: center;
+      color: #888;
+      font-style: italic;
+    }
+  </style>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+</head>
+<body>
+  <h1>💖 Eyewear Recommender</h1>
+  <form id="prefForm">
+    <h2>🌟 Your Preferences (Optional)</h2>
+    <label for="style">Style</label>
+    <select name="style" id="style">
+      <option value="">No Preference</option>
+      <option value="classic">Classic</option>
+      <option value="sporty">Sporty</option>
+      <option value="fashion">Fashion</option>
+      <option value="vintage">Vintage</option>
+      <option value="casual">Casual</option>
+      <option value="minimalist">Minimalist</option>
+    </select>
+
+    <label for="rim_type">Rim Type</label>
+    <select name="rim_type" id="rim_type">
+      <option value="">No Preference</option>
+      <option value="full-rim">Full Rim</option>
+      <option value="half-rim">Half Rim</option>
+      <option value="rimless">Rimless</option>
+    </select>
+
+    <label for="material">Material</label>
+    <select name="material" id="material">
+      <option value="">No Preference</option>
+      <option value="acetate">Acetate</option>
+      <option value="metal">Metal</option>
+      <option value="plastic">Plastic</option>
+      <option value="titanium">Titanium</option>
+      <option value="ultem">Ultem</option>
+      <option value="TR-90">TR-90</option>
+    </select>
+  </form>
+
+  <video id="video" autoplay muted></video>
+  <div class="button-group">
+    <button id="snap">📸 Capture & Recommend</button>
+    <button id="downloadBtn" class="hidden">⬇️ Download .obj</button>
+  </div>
+
+  <canvas id="canvas" width="320" height="240" class="hidden"></canvas>
+  <img id="snapshotPreview" alt="Snapshot Preview" class="hidden">
+  <div id="result"></div>
+
+  <script>
+    const video = document.getElementById('video');
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    const snap = document.getElementById('snap');
+    const downloadBtn = document.getElementById('downloadBtn');
+    const snapshotPreview = document.getElementById('snapshotPreview');
+    const resultDiv = document.getElementById('result');
+    const form = document.getElementById('prefForm');
+    let currentLandmarks = null;
+
+    // Start webcam
+    navigator.mediaDevices.getUserMedia({ video: true }).then(stream => {
+      video.srcObject = stream;
+    }).catch(err => alert("Webcam access error: " + err.message));
+
+    // FaceMesh setup
+    const faceMesh = new FaceMesh({
+      locateFile: file => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`
+    });
+
+    faceMesh.setOptions({
+      maxNumFaces: 1,
+      refineLandmarks: true,
+      minDetectionConfidence: 0.5,
+      minTrackingConfidence: 0.5
+    });
+
+    faceMesh.onResults(results => {
+      if (results.multiFaceLandmarks?.length > 0) {
+        currentLandmarks = results.multiFaceLandmarks[0];
+        downloadBtn.classList.remove('hidden');
+      }
+    });
+
+    const camera = new Camera(video, {
+      onFrame: async () => await faceMesh.send({ image: video }),
+      width: 320,
+      height: 240
+    });
+    camera.start();
+
+    // Capture and analyze
+    snap.addEventListener('click', async () => {
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      const dataUrl = canvas.toDataURL('image/jpeg');
+      snapshotPreview.src = dataUrl;
+      snapshotPreview.classList.remove('hidden');
+
+      canvas.toBlob(async (blob) => {
+        const formData = new FormData();
+        formData.append('file', blob, 'snapshot.jpg');
+
+        const style = form.style.value || 'classic';
+        const rim = form.rim_type.value || 'full-rim';
+        const material = form.material.value || 'acetate';
+
+        formData.append("style", style);
+        formData.append("rim_type", rim);
+        formData.append("material", material);
+
+        resultDiv.innerHTML = `<p class="loading">Analyzing face and preferences...</p>`;
+
+        try {
+          const res = await fetch("/analyze-face", {
+            method: "POST",
+            body: formData
+          });
+
+          const data = await res.json();
+
+          if (data.error) {
+            resultDiv.innerHTML = `<p style="color:red;">❌ ${data.error}</p>`;
+            return;
+          }
+
+          resultDiv.innerHTML = `
+            <h2>✅ Face Analysis</h2>
+            <p><strong>Width:</strong> ${data.face_width.toFixed(4)}</p>
+            <p><strong>Height:</strong> ${data.face_height.toFixed(4)}</p>
+            <p><strong>Shape:</strong> ${data.face_shape}</p>
+            <h2>🎯 Recommended Frames</h2>
+            ${data.recommended_frames.map(f => `
+              <div class="frame-item">
+                <img src="${f.image_url}" alt="${f.name}">
+                <div class="frame-details">
+                  <strong>${f.name}</strong> (${f.brand})<br>
+                  Style: ${f.style} | Rim: ${f.rim_type} | Material: ${f.material}<br>
+                  Size: ${f.width_mm}mm x ${f.height_mm}mm<br>
+                  Similarity: ${(f.similarity * 100).toFixed(2)}%
+                </div>
+              </div>
+            `).join('')}
+          `;
+        } catch (err) {
+          resultDiv.innerHTML = `<p style="color:red;">❌ Error: ${err.message}</p>`;
+        }
+      }, 'image/jpeg');
+    });
+
+    // Download landmarks as .obj
     downloadBtn.addEventListener('click', () => {
       if (!currentLandmarks) return;
 
@@ -176,3 +562,4 @@
   </script>
 </body>
 </html>
+

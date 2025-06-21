@@ -62,72 +62,107 @@ def classify_face_shape(landmarks):
         return "Oblong"
     else:
         return "Oval"
+    
+def encode_user_vector(width, height, style, rim_type, material):
+    return [
+        round(width / 200, 4),
+        round(height / 100, 4),
+        int(style == "classic"),
+        int(rim_type == "full-rim"),
+        int(material == "acetate")
+    ]
 
 @app.get("/", response_class=HTMLResponse)
 def index(request: Request):
     return templates.TemplateResponse("index.html", {"request": request})
 
-
 @app.post("/analyze-face")
-async def analyze_face(file: UploadFile = File(...)):
+async def analyze_face(
+    file: UploadFile = File(...),
+    style: str = Form("classic"),
+    rim_type: str = Form("full-rim"),
+    material: str = Form("acetate")
+):
     content = await file.read()
     nparr = np.frombuffer(content, np.uint8)
     img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
     rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
     results = face_mesh.process(rgb)
 
-    if results.multi_face_landmarks:
-        landmarks = results.multi_face_landmarks[0].landmark
-        p1 = np.array([landmarks[234].x, landmarks[234].y])
-        p2 = np.array([landmarks[454].x, landmarks[454].y])
-        p3 = np.array([landmarks[10].x, landmarks[10].y])
-        p4 = np.array([landmarks[152].x, landmarks[152].y])
+    if not results.multi_face_landmarks:
+        return {"error": "No face detected"}
 
-        face_width = np.linalg.norm(p2 - p1)
-        face_height = np.linalg.norm(p4 - p3)
+    landmarks = results.multi_face_landmarks[0].landmark
+    p1 = np.array([landmarks[234].x, landmarks[234].y])
+    p2 = np.array([landmarks[454].x, landmarks[454].y])
+    p3 = np.array([landmarks[10].x, landmarks[10].y])
+    p4 = np.array([landmarks[152].x, landmarks[152].y])
 
-        # Simple vector representation (you can improve this)
-        face_vector = np.array([[face_width, face_height, 1, 1, 1]])
+    face_width = np.linalg.norm(p2 - p1)
+    face_height = np.linalg.norm(p4 - p3)
+    face_shape = classify_face_shape(landmarks)
 
-        distances, indices = knn_model.kneighbors(face_vector)
-        recommended = []
-        face_shape = classify_face_shape(landmarks)
-        for idx, dist in zip(indices[0], distances[0]):
-            frame = frame_vectors[idx]
-            similarity = 1 - dist
-            recommended.append({
-                "name": frame["name"],
-                "brand": frame["brand"],
-                "image_url": frame["image_url"],
-                "similarity": float(similarity)
-            })
+    user_vector = encode_user_vector(
+        face_width * 200,
+        face_height * 100,
+        style,
+        rim_type,
+        material
+    )
 
-        return {
-            "face_shape": face_shape,
-            "face_width": face_width,
-            "face_height": face_height,
-            "recommended_frames": recommended
-        }
+    distances, indices = knn_model.kneighbors([user_vector])
+    recommended = []
+    for idx, dist in zip(indices[0], distances[0]):
+        frame = frame_vectors[idx]
+        similarity = 1 - dist
+        recommended.append({
+            "name": frame["name"],
+            "brand": frame["brand"],
+            "image_url": frame["image_url"],
+            "style": frame["style"],
+            "rim_type": frame["rim_type"],
+            "material": frame["material"],
+            "width_mm": frame["width_mm"],
+            "height_mm": frame["height_mm"],
+            "similarity": float(similarity)
+        })
 
-    return {"error": "No face detected"}
-
+    return {
+        "face_shape": face_shape,
+        "face_width": face_width,
+        "face_height": face_height,
+        "recommended_frames": recommended
+    }
 
 
 @app.post("/recommend-frames")
 async def recommend_frames(
-    user_preferences: str = Form(...),
+    style: str = Form(...),
+    rim_type: str = Form(...),
+    material: str = Form(...),
     lifestyle: str = Form(...),
-    prescription: str = Form(...)
+    prescription: str = Form(...),
+    face_width: float = Form(...),
+    face_height: float = Form(...)
 ):
     if not knn_model:
-        return {"error": "Recommendation model not available"}
+        return {"error": "Model not loaded"}
 
-    # NOTE: Dummy encoding for simplicity
-    pref_vector = np.random.rand(1, 128)
-    distances, indices = knn_model.kneighbors(pref_vector)
-    recommendations = [frame_vectors[i]["id"] for i in indices[0]]
+    try:
+        user_vector = encode_user_vector(face_width, face_height, style, rim_type, material)
+        distances, indices = knn_model.kneighbors([user_vector])
 
-    return {"recommended_frames": recommendations}
+        top_matches = []
+        for idx, dist in zip(indices[0], distances[0]):
+            frame = frame_vectors[idx]
+            frame["similarity"] = 1.0 - dist
+            top_matches.append(frame)
+        print(top_matches[:5])
+        return {"recommended_frames": top_matches[:5]}
+
+    except Exception as e:
+        return {"error": f"Backend error: {str(e)}"}
+
 
 if __name__ == "__main__":
     import uvicorn
