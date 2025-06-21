@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>🕶️ Eyewear Recommender</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      padding: 20px;
+      max-width: 800px;
+      margin: auto;
+    }
+
+    video, canvas, #snapshotPreview {
+      width: 320px;
+      height: 240px;
+      border: 1px solid #ccc;
+      margin-top: 10px;
+    }
+
+    .frame-item {
+      display: flex;
+      align-items: center;
+      margin-bottom: 15px;
+      border-bottom: 1px solid #eee;
+      padding-bottom: 10px;
+    }
+
+    .frame-item img {
+      width: 100px;
+      height: auto;
+      margin-right: 10px;
+    }
+
+    .frame-details {
+      font-size: 14px;
+    }
+
+    h1, h2 {
+      margin-bottom: 10px;
+    }
+
+    #downloadBtn {
+      margin-top: 10px;
+      padding: 8px 15px;
+      background: #2c7be5;
+      color: white;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      display: none;
+    }
+
+    #downloadBtn:hover {
+      background-color: #1b59c9;
+    }
+  </style>
+  <!-- MediaPipe FaceMesh -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+</head>
+<body>
+  <h1>🕶️ Eyewear Recommender</h1>
+
+  <video id="video" autoplay muted></video><br>
+  <button id="snap">📸 Capture & Analyze</button><br>
+  <button id="downloadBtn">⬇️ Download .obj</button>
+
+  <canvas id="canvas" width="320" height="240" style="display:none;"></canvas>
+  <img id="snapshotPreview" alt="Snapshot Preview" style="display: none;"><br>
+
+  <div id="result" style="margin-top: 30px;"></div>
+
+  <script>
+    const video = document.getElementById('video');
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    const snap = document.getElementById('snap');
+    const downloadBtn = document.getElementById('downloadBtn');
+    const snapshotPreview = document.getElementById('snapshotPreview');
+    const resultDiv = document.getElementById('result');
+    let currentLandmarks = null;
+
+    // Set up webcam stream
+    navigator.mediaDevices.getUserMedia({ video: true }).then(stream => {
+      video.srcObject = stream;
+    }).catch(err => {
+      alert("Webcam access error: " + err.message);
+    });
+
+    // MediaPipe FaceMesh setup
+    const faceMesh = new FaceMesh({
+      locateFile: file => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`
+    });
+
+    faceMesh.setOptions({
+      maxNumFaces: 1,
+      refineLandmarks: true,
+      minDetectionConfidence: 0.5,
+      minTrackingConfidence: 0.5
+    });
+
+    faceMesh.onResults(results => {
+      if (results.multiFaceLandmarks && results.multiFaceLandmarks.length > 0) {
+        currentLandmarks = results.multiFaceLandmarks[0];
+        downloadBtn.style.display = "inline-block";
+      }
+    });
+
+    const camera = new Camera(video, {
+      onFrame: async () => {
+        await faceMesh.send({ image: video });
+      },
+      width: 320,
+      height: 240
+    });
+    camera.start();
+
+    // Button: Analyze & capture
+    snap.addEventListener('click', async () => {
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      const dataUrl = canvas.toDataURL('image/jpeg');
+      snapshotPreview.src = dataUrl;
+      snapshotPreview.style.display = 'block';
+
+      canvas.toBlob(async (blob) => {
+        const formData = new FormData();
+        formData.append('file', blob, 'snapshot.jpg');
+
+        try {
+          const res = await fetch("/analyze-face", {
+            method: "POST",
+            body: formData
+          });
+
+          const data = await res.json();
+
+          if (data.error) {
+            resultDiv.innerHTML = `<p style="color:red;">❌ ${data.error}</p>`;
+            return;
+          }
+
+          resultDiv.innerHTML = `
+            <h2>✅ Face Analysis</h2>
+            <p><strong>Width:</strong> ${data.face_width.toFixed(4)}</p>
+            <p><strong>Height:</strong> ${data.face_height.toFixed(4)}</p>
+            <p><strong>Shape:</strong> ${data.face_shape}</p>
+            <h2>🎯 Recommended Frames</h2>
+            ${data.recommended_frames.map(f => `
+              <div class="frame-item">
+                <img src="${f.image_url}" alt="${f.name}">
+                <div class="frame-details">
+                  <strong>${f.name}</strong> (${f.brand})<br>
+                  Similarity: ${(f.similarity * 100).toFixed(2)}%
+                </div>
+              </div>
+            `).join('')}
+          `;
+        } catch (err) {
+          resultDiv.innerHTML = `<p style="color:red;">❌ Error: ${err.message}</p>`;
+        }
+      }, 'image/jpeg');
+    });
+
+    // Download .obj file
+    downloadBtn.addEventListener('click', () => {
+      if (!currentLandmarks) return;
+
+      const obj = currentLandmarks.map(p => `v ${p.x} ${p.y} ${p.z}`).join('\n');
+      const blob = new Blob([obj], { type: "text/plain" });
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(blob);
+      link.download = "face_mesh.obj";
+      link.click();
+    });
+  </script>
+</body>
+</html>
